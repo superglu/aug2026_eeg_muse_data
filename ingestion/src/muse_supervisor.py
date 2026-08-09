@@ -1,48 +1,111 @@
 """Keep the Muse-to-LSL bridge alive for a whole collection session.
 
-Scans for the headset and connects in a loop: whenever the headset sleeps,
-drops, or changes heads, this reconnects automatically as soon as it is
-advertising again. Leave it running for the entire session so participants
-never wait on a manual reconnect.
+Parent/worker design so a hung Bluetooth connect cannot stall the session:
+
+- The worker (--worker) does one cycle: scan, report what is visible,
+  connect, stream until disconnect, exit.
+- The parent respawns the worker forever and enforces a connect watchdog:
+  if a worker has not reached "Streaming" within --connect-timeout seconds,
+  it is killed and respawned. macOS BLE-stack hangs (observed after abrupt
+  headset power loss) self-heal instead of requiring a manual restart.
+
+The scan log distinguishes the failure modes:
+  - "MUSE VISIBLE at <addr>"  -> advertising; connecting
+  - "address changed"         -> macOS reassigned the BLE UUID (e.g. after a
+                                 headset reboot); auto-switching
+  - "NO MUSE advertising"     -> headset off, asleep, or connected elsewhere
+                                 (phone app!) — fix at the headset
 
 Usage:
-    python ingestion/src/muse_supervisor.py                    # first Muse found
-    python ingestion/src/muse_supervisor.py --address <UUID>   # specific headset
+    python ingestion/src/muse_supervisor.py                     # any Muse
+    python ingestion/src/muse_supervisor.py --address <UUID>    # prefer one
 """
 
 import argparse
+import subprocess
+import sys
+import threading
 import time
+from queue import Empty, Queue
 
-from muselsl import list_muses, stream
+STREAMING_MARKER = "Streaming"
+
+
+def log(msg: str) -> None:
+    print(f"[supervisor {time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def worker(address: str | None) -> None:
+    """One scan+connect+stream cycle. Runs in a child process."""
+    from muselsl import list_muses, stream
+
+    log("scanning...")
+    muses = list_muses()
+    if not muses:
+        log("NO MUSE advertising — headset is off, asleep, or connected elsewhere (phone app?)")
+        return
+
+    names = ", ".join(f"{m['name']} at {m['address']}" for m in muses)
+    log(f"MUSE VISIBLE: {names}")
+
+    if address and not any(m["address"] == address for m in muses):
+        log(f"address changed: configured {address} not seen — switching to {muses[0]['address']}")
+        address = None
+    address = address or muses[0]["address"]
+
+    log(f"connecting to {address}")
+    stream(address)  # blocks until the headset disconnects; prints "Streaming EEG..."
+    log("headset disconnected")
+
+
+def supervise(address: str | None, connect_timeout: float) -> None:
+    while True:
+        cmd = [sys.executable, __file__, "--worker"]
+        if address:
+            cmd += ["--address", address]
+        child = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+
+        lines: Queue[str | None] = Queue()
+        threading.Thread(target=lambda: ([lines.put(l) for l in child.stdout] and None) or lines.put(None),
+                         daemon=True).start()
+
+        started = time.monotonic()
+        streaming = False
+        while True:
+            try:
+                line = lines.get(timeout=5)
+            except Empty:
+                line = ""
+            if line is None:  # child exited
+                break
+            if line:
+                print(line, end="", flush=True)
+                if STREAMING_MARKER in line:
+                    streaming = True
+            if not streaming and time.monotonic() - started > connect_timeout:
+                log(f"WATCHDOG: no stream after {connect_timeout:.0f} s — killing stuck worker and retrying")
+                child.kill()
+                break
+
+        child.wait()
+        time.sleep(3)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Auto-reconnecting Muse-to-LSL bridge")
-    parser.add_argument("--address", default=None, help="Device address (default: first Muse found)")
+    parser = argparse.ArgumentParser(description="Auto-reconnecting Muse-to-LSL bridge with connect watchdog")
+    parser.add_argument("--address", default=None, help="Preferred device address (auto-switches if it changes)")
+    parser.add_argument("--connect-timeout", type=float, default=90.0,
+                        help="Seconds a worker may spend scanning+connecting before it is killed (default 90)")
+    parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
-    address = args.address
-    while True:
+    if args.worker:
+        worker(args.address)
+    else:
         try:
-            if address is None:
-                print("[supervisor] scanning for Muse...", flush=True)
-                muses = list_muses()
-                if not muses:
-                    print("[supervisor] none found (asleep? connected elsewhere?), retrying in 5 s", flush=True)
-                    time.sleep(5)
-                    continue
-                address = muses[0]["address"]
-                print(f"[supervisor] found {muses[0]['name']} at {address}", flush=True)
-
-            print(f"[supervisor] connecting to {address}", flush=True)
-            stream(address)  # blocks until the headset disconnects
-            print("[supervisor] headset disconnected, reconnecting...", flush=True)
+            supervise(args.address, args.connect_timeout)
         except KeyboardInterrupt:
-            print("[supervisor] stopped", flush=True)
-            return
-        except Exception as exc:  # noqa: BLE001 - keep the session alive no matter what
-            print(f"[supervisor] error: {exc}; retrying in 5 s", flush=True)
-            time.sleep(5)
+            log("stopped")
 
 
 if __name__ == "__main__":
