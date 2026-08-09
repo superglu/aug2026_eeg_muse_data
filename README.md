@@ -25,9 +25,18 @@ python src/stream_eeg.py
 **Terminal 2** — subscribe to the stream:
 
 ```sh
-python src/print_eeg.py    # raw electrode values + band powers, once per second
-python src/plot_live.py    # live scrolling plot of all four channels
+python src/print_eeg.py     # raw electrode values + band powers, once per second
+python src/plot_live.py     # live scrolling plot of all four channels
+python src/record_eeg.py    # record the session to data/eeg_<timestamp>.csv
 ```
+
+Recordings can be analyzed offline with [MNE-Python](https://mne.tools):
+
+```sh
+python src/analyze_session.py data/eeg_<timestamp>.csv
+```
+
+This prints relative band powers and opens the power spectrum and filtered raw traces in MNE's viewers.
 
 `stream_eeg.py` accepts `--address <MAC or UUID>` to target a specific headset; without it, it connects to the first Muse found. The muselsl CLI is also available directly: `muselsl list`, `muselsl stream`, `muselsl view`.
 

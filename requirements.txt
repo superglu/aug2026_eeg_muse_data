@@ -2,3 +2,4 @@ muselsl==2.5.1
 pylsl==1.18.2
 numpy==2.5.2
 matplotlib==3.11.1
+mne==1.12.1
