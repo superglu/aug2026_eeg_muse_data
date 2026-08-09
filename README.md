@@ -69,7 +69,13 @@ For each subject:
 2. Record one minute: `python src/record_eeg.py --user <name>`.
 3. Recordings land in `data/<name>_<timestamp>.csv`, one file per session.
 
-The `data/` directory is **gitignored** — recordings are shared via Google Drive, not the repo. Upload the CSV files to a shared Drive folder after a collection session; collaborators drop them into their own `data/` directory to analyze with `analyze_session.py`.
+The `data/` directory is **gitignored** — recordings are shared via Google Drive, not the repo. Upload after a collection session with [rclone](https://rclone.org) (one-time setup: `brew install rclone && rclone config create gdrive drive scope=drive`):
+
+```sh
+rclone copy data/ "gdrive:muse-eeg-data 2026-08-09"
+```
+
+Collaborators drop the CSVs into their own `data/` directory to analyze with `analyze_session.py`.
 
 ## Headset behavior worth knowing
 
