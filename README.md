@@ -96,6 +96,7 @@ Collaborators drop the CSVs into their own `data/` directory to analyze with `an
 [ZUNA1.1](https://huggingface.co/Zyphra/ZUNA1.1) (Zyphra's open-weight EEG foundation model, Apache 2.0) denoises recordings, reconstructs bad or missing channels, and can upsample to larger montages. It runs locally as a Python library — weights (~1.5 GB) auto-download from Hugging Face on first use.
 
 ```sh
+python muse_to_fif.py data/<recording>.csv       # convert a Muse recording to fif_in/<name>_raw.fif
 python clean_eeg.py                              # clean every .fif in fif_in/
 python clean_eeg.py --repair-channels Cz T3      # also fully reconstruct named channels
 python clean_eeg.py --target-channels 64         # upsample the montage to 64 channels

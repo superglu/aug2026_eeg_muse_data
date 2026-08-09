@@ -4,3 +4,4 @@ numpy==2.5.2
 matplotlib==3.11.1
 mne==1.12.1
 zuna==1.1.6
+pandas==3.0.5
