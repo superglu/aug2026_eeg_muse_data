@@ -1,12 +1,12 @@
 """Record the Muse EEG LSL stream to a CSV file.
 
-Run src/stream_eeg.py in another terminal first. Writes one row per
-sample with the LSL timestamp, into data/ by default. Stop with Ctrl+C
-or use --duration.
+Run src/stream_eeg.py in another terminal first. Records 60 seconds by
+default (use --duration, or --duration 0 to run until Ctrl+C), writing
+one row per sample with the LSL timestamp into data/<user>_<timestamp>.csv.
 
 Usage:
-    python src/record_eeg.py                     # record until Ctrl+C
-    python src/record_eeg.py --duration 60       # record 60 seconds
+    python src/record_eeg.py --user gary          # 60 s for subject "gary"
+    python src/record_eeg.py --user ada --duration 120
     python src/record_eeg.py --out data/rest.csv
 """
 
@@ -22,9 +22,12 @@ CHANNEL_NAMES = ["TP9", "AF7", "AF8", "TP10", "AUX"]
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Record Muse 2 EEG from LSL to CSV")
-    parser.add_argument("--duration", type=float, default=None, help="Seconds to record (default: until Ctrl+C)")
-    parser.add_argument("--out", default=None, help="Output file (default: data/eeg_<timestamp>.csv)")
+    parser.add_argument("--user", default="anon", help="Subject name, used in the filename (default: anon)")
+    parser.add_argument("--duration", type=float, default=60.0, help="Seconds to record (default: 60; 0 = until Ctrl+C)")
+    parser.add_argument("--out", default=None, help="Output file (default: data/<user>_<timestamp>.csv)")
     args = parser.parse_args()
+    if args.duration == 0:
+        args.duration = None
 
     print("Looking for an EEG stream (run src/stream_eeg.py first)...")
     streams = resolve_byprop("type", "EEG", timeout=30)
@@ -38,10 +41,11 @@ def main() -> None:
         out_path = Path(args.out)
     else:
         stamp = time.strftime("%Y-%m-%d_%H-%M-%S")
-        out_path = Path("data") / f"eeg_{stamp}.csv"
+        out_path = Path("data") / f"{args.user}_{stamp}.csv"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"Connected ({sampling_rate:.0f} Hz). Recording to {out_path} — Ctrl+C to stop.")
+    target = f"{args.duration:.0f} s" if args.duration else "until Ctrl+C"
+    print(f"Connected ({sampling_rate:.0f} Hz). Recording {target} to {out_path}.")
 
     n_samples = 0
     started = local_clock()

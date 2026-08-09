@@ -38,7 +38,7 @@ python src/stream_eeg.py
 ```sh
 python src/print_eeg.py                  # raw electrode values + band powers, once per second
 python src/plot_live.py                  # live scrolling plot of all four channels
-python src/record_eeg.py --duration 60   # record to data/eeg_<timestamp>.csv (omit --duration to run until Ctrl+C)
+python src/record_eeg.py --user gary     # record 60 s to data/gary_<timestamp>.csv (--duration to change, 0 = until Ctrl+C)
 ```
 
 Analyze a recording offline:
@@ -60,6 +60,16 @@ Watch `plot_live.py` while wearing the headset:
 - **Jaw clench test**: clenching produces broadband noise bursts, strongest on TP9/TP10 (the ear channels).
 
 If the plot reacts instantly to blinks and clenches, the whole pipeline is live.
+
+## Collecting data from multiple users
+
+For each subject:
+
+1. Fit the headset and check contact quality with `plot_live.py` (see below) — don't record until all four channels have settled.
+2. Record one minute: `python src/record_eeg.py --user <name>`.
+3. Recordings land in `data/<name>_<timestamp>.csv`, one file per session.
+
+The `data/` directory is **gitignored** — recordings are shared via Google Drive, not the repo. Upload the CSV files to a shared Drive folder after a collection session; collaborators drop them into their own `data/` directory to analyze with `analyze_session.py`.
 
 ## Headset behavior worth knowing
 
