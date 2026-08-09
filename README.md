@@ -91,6 +91,23 @@ Collaborators drop the CSVs into their own `data/` directory to analyze with `an
 - muselsl can also publish PPG, accelerometer, and gyro streams: `muselsl stream --ppg --acc --gyro`.
 - A good first experiment: record 60 s with eyes open for the first half and closed for the second — alpha power (8–13 Hz) should visibly increase with eyes closed.
 
+## Cleaning recordings with ZUNA1.1
+
+[ZUNA1.1](https://huggingface.co/Zyphra/ZUNA1.1) (Zyphra's open-weight EEG foundation model, Apache 2.0) denoises recordings, reconstructs bad or missing channels, and can upsample to larger montages. It runs locally as a Python library — weights (~1.5 GB) auto-download from Hugging Face on first use.
+
+```sh
+python clean_eeg.py                              # clean every .fif in fif_in/
+python clean_eeg.py --repair-channels Cz T3      # also fully reconstruct named channels
+python clean_eeg.py --target-channels 64         # upsample the montage to 64 channels
+python clean_eeg.py --bad-segments 5:6 10:11:C3  # reconstruct time spans (start:end[:channel])
+```
+
+- Inputs are `.fif` files in `fif_in/`; cleaned files land in `fif_out/full_reconstruction/` (model output everywhere) and `fif_out/hybrid/` (original signal, model output only where inferred), with diagnostic overlays in `figures/`. All three directories are gitignored data.
+- Channels/spans already marked bad in the file (MNE `info['bads']`, `BAD_` annotations) are reconstructed automatically, in union with the flags above.
+- Convert numpy arrays to `.fif` with `eeg_io.numpy_to_fif()` — electrode positions are required (the model predicts from scalp coordinates), and segments must be 0.5–30 s.
+- On this Mac inference runs on CPU (`--gpu-device ""`, the default here); `--gpu-device 0` etc. is for CUDA machines.
+- **Research use only** — Zyphra explicitly disclaims medical/clinical validity.
+
 ## Roadmap
 
 - [x] Bluetooth → LSL bridge, live console + plot consumers

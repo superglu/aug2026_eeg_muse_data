@@ -3,3 +3,4 @@ pylsl==1.18.2
 numpy==2.5.2
 matplotlib==3.11.1
 mne==1.12.1
+zuna==1.1.6
