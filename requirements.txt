@@ -5,3 +5,4 @@ matplotlib==3.11.1
 mne==1.12.1
 zuna==1.1.6
 pandas==3.0.5
+scikit-learn==1.9.0
