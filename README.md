@@ -114,7 +114,7 @@ python clean_eeg.py --bad-segments 5:6 10:11:C3  # reconstruct time spans (start
 - [x] Bluetooth → LSL bridge, live console + plot consumers
 - [x] Hardware smoke test (bridge connects, samples flow at 256 Hz)
 - [x] CSV session recorder + MNE analysis (validated on synthetic 10 Hz alpha data)
-- [ ] On-head signal-quality pass (settle / blink / jaw-clench checks)
-- [ ] First real recording: eyes-open vs eyes-closed alpha comparison
+- [x] On-head signal-quality pass (electrode settle checks during collection)
+- [x] First real recording: eyes-open vs eyes-closed alpha comparison (2026-08-09: absolute alpha rose 1.3-5.7x per channel with eyes closed — use absolute per-channel power, not relative shares, which slow-drift artifacts distort)
 - [ ] Marker stream publisher for stimulus/event timestamps, recorded alongside EEG
 - [ ] Optional: LabRecorder + XDF for multi-stream recordings once markers exist
