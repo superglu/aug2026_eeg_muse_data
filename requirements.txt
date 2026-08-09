@@ -1,3 +1,4 @@
-brainflow==5.22.2
+muselsl==2.5.1
+pylsl==1.18.2
 numpy==2.5.2
 matplotlib==3.11.1
