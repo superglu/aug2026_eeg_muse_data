@@ -1,8 +1,19 @@
 # Muse 2 real-time EEG
 
-Stream real-time EEG data from a [Muse 2](https://choosemuse.com) headset in Python, using [muselsl](https://github.com/alexandrebarachant/muse-lsl) and the [lab streaming layer](https://labstreaminglayer.org) (LSL).
+Stream, record, and analyze real-time EEG from a [Muse 2](https://choosemuse.com) headset in Python, using [muselsl](https://github.com/alexandrebarachant/muse-lsl), the [lab streaming layer](https://labstreaminglayer.org) (LSL), and [MNE-Python](https://mne.tools).
 
-muselsl runs a bridge process that connects to the headset over Bluetooth and publishes its data as an LSL stream on your machine; any number of other processes can then subscribe to that stream.
+## Architecture
+
+muselsl runs a **bridge process** that connects to the headset over Bluetooth and publishes its data as an LSL stream on your machine; any number of consumer processes then subscribe to that stream simultaneously. The stream itself is ephemeral (small in-memory buffers, nothing persisted) — recording is just one more consumer that writes to disk.
+
+This two-process design is deliberate: the exclusive, fragile Bluetooth link lives in its own process so consumers can crash and restart freely, and being on LSL keeps the setup compatible with the standard neuroscience tooling ecosystem (LabRecorder/XDF, MNE, `mne-lsl`, marker streams for experiments).
+
+```
+Muse 2 --BLE--> stream_eeg.py --LSL--> print_eeg.py / plot_live.py / record_eeg.py / your code
+                                                                         |
+                                                                         v
+                                                            data/*.csv --> analyze_session.py (MNE)
+```
 
 ## Setup
 
@@ -14,7 +25,7 @@ pip install -r requirements.txt
 
 ## Usage
 
-Turn on the Muse 2 and make sure it is **not** connected to the Muse app or any other program (it only accepts one Bluetooth connection at a time).
+Power on the headset (hold the button until the LEDs pulse) and make sure it is **not** connected to the Muse app or any other program — it accepts only one Bluetooth connection at a time.
 
 **Terminal 1** — start the Bluetooth-to-LSL bridge and leave it running:
 
@@ -22,28 +33,54 @@ Turn on the Muse 2 and make sure it is **not** connected to the Muse app or any 
 python src/stream_eeg.py
 ```
 
-**Terminal 2** — subscribe to the stream:
+**Terminal 2** — subscribe to the stream with any (or several) of:
 
 ```sh
-python src/print_eeg.py     # raw electrode values + band powers, once per second
-python src/plot_live.py     # live scrolling plot of all four channels
-python src/record_eeg.py    # record the session to data/eeg_<timestamp>.csv
+python src/print_eeg.py                  # raw electrode values + band powers, once per second
+python src/plot_live.py                  # live scrolling plot of all four channels
+python src/record_eeg.py --duration 60   # record to data/eeg_<timestamp>.csv (omit --duration to run until Ctrl+C)
 ```
 
-Recordings can be analyzed offline with [MNE-Python](https://mne.tools):
+Analyze a recording offline:
 
 ```sh
 python src/analyze_session.py data/eeg_<timestamp>.csv
 ```
 
-This prints relative band powers and opens the power spectrum and filtered raw traces in MNE's viewers.
+This loads the session into MNE with proper electrode positions, bandpass filters 1–50 Hz, prints relative band powers (delta/theta/alpha/beta/gamma), and opens MNE's power-spectrum and raw-trace viewers (`--no-plot` to skip the windows).
 
 `stream_eeg.py` accepts `--address <MAC or UUID>` to target a specific headset; without it, it connects to the first Muse found. The muselsl CLI is also available directly: `muselsl list`, `muselsl stream`, `muselsl view`.
 
+## Checking signal quality
+
+Watch `plot_live.py` while wearing the headset:
+
+- **Good contact**: a trace settles from full-height noise into a tight band (roughly ±50–100 µV) within ~10 s. A channel stuck railing at ±1000 µV has no skin contact — reposition it; slightly wetting the skin helps a lot with the ear electrodes.
+- **Blink test**: hard blinks produce sharp spikes on AF7/AF8 (the forehead channels).
+- **Jaw clench test**: clenching produces broadband noise bursts, strongest on TP9/TP10 (the ear channels).
+
+If the plot reacts instantly to blinks and clenches, the whole pipeline is live.
+
+## Headset behavior worth knowing
+
+- The Muse only advertises over Bluetooth when nothing is connected to it (LEDs pulsing = ready to pair).
+- If it loses its connection while not being worn, it goes to sleep within minutes and disappears from scans — press the power button to wake it, then restart the bridge.
+- macOS prompts for Bluetooth permission for your terminal on first use; grant it in System Settings → Privacy & Security → Bluetooth if scanning finds nothing.
+
 ## Notes
 
-- Channels: TP9, AF7, AF8, TP10 (plus a right-ear AUX input if you attach an electrode).
-- Sampling rate: 256 Hz.
-- macOS will prompt for Bluetooth permission for your terminal the first time you run the bridge; grant it in System Settings → Privacy & Security → Bluetooth if the connection fails.
-- To consume the data in your own code, resolve the stream with `pylsl` — see the top of `src/print_eeg.py`.
+- Channels: TP9 (left ear), AF7 (left forehead), AF8 (right forehead), TP10 (right ear), plus an AUX input if you attach an electrode. Sampling rate: 256 Hz.
+- Recordings are one CSV per session in `data/` (gitignored): an `lsl_timestamp` column plus one column per channel, in µV.
+- To consume the stream in your own code, resolve it with `pylsl` — see the top of `src/print_eeg.py`.
 - muselsl can also publish PPG, accelerometer, and gyro streams: `muselsl stream --ppg --acc --gyro`.
+- A good first experiment: record 60 s with eyes open for the first half and closed for the second — alpha power (8–13 Hz) should visibly increase with eyes closed.
+
+## Roadmap
+
+- [x] Bluetooth → LSL bridge, live console + plot consumers
+- [x] Hardware smoke test (bridge connects, samples flow at 256 Hz)
+- [x] CSV session recorder + MNE analysis (validated on synthetic 10 Hz alpha data)
+- [ ] On-head signal-quality pass (settle / blink / jaw-clench checks)
+- [ ] First real recording: eyes-open vs eyes-closed alpha comparison
+- [ ] Marker stream publisher for stimulus/event timestamps, recorded alongside EEG
+- [ ] Optional: LabRecorder + XDF for multi-stream recordings once markers exist
