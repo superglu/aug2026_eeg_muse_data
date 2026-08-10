@@ -5,10 +5,13 @@ recordings (whole file = one condition, no in-file block annotations needed):
   data/input_ec/*.fif   eyes-closed (EC) recordings
   data/input_eo/*.fif   eyes-open (EO) recordings
 
-For each condition, builds the three ZUNA1.1 comparison branches (raw / denoised /
-upsampled) via branches.build_branches, extracts alpha-power features per branch
-(one group per recording, so GroupKFold in classify.py never splits epochs from the
-same file across folds), and runs the EO/EC spectral + classification comparison.
+For each condition, builds the raw/denoised/upsampled branches via branches.build_branches,
+then extracts alpha-power features from the full_reconstruction .fif of each of the
+three branches (hybrid is skipped for both -- identical to full_reconstruction for
+denoised, and full_reconstruction is used instead of hybrid for upsampled here for a
+consistent "model regenerates everything" comparison across both). One group per
+recording, so GroupKFold in classify.py never splits epochs from the same file across
+folds.
 
   eeg/bin/python3 eo_ec_pipeline/run_eo_ec_test.py
   eeg/bin/python3 eo_ec_pipeline/run_eo_ec_test.py --gpu-device ""   # CPU
@@ -27,18 +30,19 @@ CONDITION_INPUT_DIRS = {"EC": "data/input_ec", "EO": "data/input_eo"}
 BRANCH_SUBDIR = {
     "raw": "raw",
     "denoised": "denoised/full_reconstruction",
-    "upsampled": "upsampled/hybrid",
+    "upsampled": "upsampled/full_reconstruction",
 }
 
 
-def run_eo_ec_test(branch_root: str = "data/branches", gpu_device=0) -> pd.DataFrame:
+def run_eo_ec_test(branch_root: str = "data/branches", gpu_device=0, skip_build: bool = False) -> pd.DataFrame:
     branch_root = Path(branch_root)
 
-    for condition, input_dir in CONDITION_INPUT_DIRS.items():
-        fifs = list(Path(input_dir).glob("*.fif"))
-        if not fifs:
-            raise FileNotFoundError(f"No .fif files found in {input_dir} ({condition})")
-        build_branches(input_dir, branch_root / condition, gpu_device=gpu_device)
+    if not skip_build:
+        for condition, input_dir in CONDITION_INPUT_DIRS.items():
+            fifs = list(Path(input_dir).glob("*.fif"))
+            if not fifs:
+                raise FileNotFoundError(f"No .fif files found in {input_dir} ({condition})")
+            build_branches(input_dir, branch_root / condition, gpu_device=gpu_device)
 
     dfs = []
     for condition in CONDITION_INPUT_DIRS:
@@ -66,5 +70,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--branch-root", default="data/branches")
     parser.add_argument("--gpu-device", default=0)
+    parser.add_argument("--skip-build", action="store_true",
+                         help="reuse existing data/branches/*/{raw,denoised,upsampled} output instead of re-running ZUNA")
     args = parser.parse_args()
-    run_eo_ec_test(args.branch_root, gpu_device=args.gpu_device)
+    run_eo_ec_test(args.branch_root, gpu_device=args.gpu_device, skip_build=args.skip_build)

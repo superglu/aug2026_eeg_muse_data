@@ -68,7 +68,7 @@ def plot_band_power(df: pd.DataFrame, out_png: str) -> None:
 
     for i, condition in enumerate(["EC", "EO"]):
         offset = (i - 0.5) * width
-        bars = ax.bar(x + offset, means[condition], width, label=condition,
+        bars = ax.bar(x + offset, means[condition], width, label=f"{condition} (raw)",
                        color=COLORS[condition], edgecolor="none")
         ax.bar_label(bars, labels=[f"{v:.1%}" for v in means[condition]],
                      padding=2, fontsize=8, color="#52514e")

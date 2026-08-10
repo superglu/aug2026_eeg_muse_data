@@ -1,11 +1,14 @@
 """
 t-SNE visualization of per-window alpha-power feature vectors across every branch
-and reconstruction-kind produced by run_eo_ec_test.py, colored three ways:
+produced by run_eo_ec_test.py, colored three ways:
 
-  1. by subject (gary / kotora / vishwani)
+  1. by subject (gary / kotora / vishwani / dillon)
   2. by branch (raw / denoised / upsampled)
-  3. by reconstruction kind (full_reconstruction / hybrid) -- raw has neither, shown
-     as a muted "n/a" category for spatial context
+  3. by condition (eyes-closed / eyes-open)
+
+Only full_reconstruction is used for denoised/upsampled (hybrid dropped everywhere --
+identical to full_reconstruction for denoised, and full_reconstruction is used instead
+of hybrid for upsampled for a consistent "model regenerates everything" comparison).
 
 Feature vector per window = log alpha-band (8-13Hz) power on the 4 REAL Muse
 channels only (TP9, AF7, AF8, TP10) -- kept to these 4 so raw/denoised (4ch) and
@@ -30,24 +33,21 @@ from features import extract_features
 REAL_CHANNELS = ["TP9", "AF7", "AF8", "TP10"]
 CONDITION_DIRS = {"EC": "data/input_ec", "EO": "data/input_eo"}
 
-# (branch, recon_kind, subdir-under-data/branches/<condition>/)
+# (branch, subdir-under-data/branches/<condition>/)
 VARIANTS = [
-    ("raw", None, "raw"),
-    ("denoised", "full_reconstruction", "denoised/full_reconstruction"),
-    ("denoised", "hybrid", "denoised/hybrid"),
-    ("upsampled", "full_reconstruction", "upsampled/full_reconstruction"),
-    ("upsampled", "hybrid", "upsampled/hybrid"),
+    ("raw", "raw"),
+    ("denoised", "denoised/full_reconstruction"),
+    ("upsampled", "upsampled/full_reconstruction"),
 ]
 
 CATEGORICAL = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]  # validated slots 1-4
-MUTED_GRAY = "#9a9a95"
 
 
 def build_feature_table(branch_root: str = "data/branches") -> pd.DataFrame:
     branch_root = Path(branch_root)
     rows = []
     for condition in CONDITION_DIRS:
-        for branch, recon_kind, subdir in VARIANTS:
+        for branch, subdir in VARIANTS:
             variant_dir = branch_root / condition / subdir
             fifs = sorted(variant_dir.glob("*.fif"))
             if not fifs:
@@ -55,7 +55,7 @@ def build_feature_table(branch_root: str = "data/branches") -> pd.DataFrame:
                 continue
             for fif in fifs:
                 subject = fif.stem.split("_")[0]
-                block_id = f"{condition}_{branch}_{recon_kind}_{fif.stem}"
+                block_id = f"{condition}_{branch}_{fif.stem}"
                 df = extract_features(str(fif), branch, condition=condition, block_id=block_id)
                 wide = df[df["channel"].isin(REAL_CHANNELS)].pivot_table(
                     index="epoch_idx", columns="channel", values="log_alpha_power"
@@ -63,7 +63,6 @@ def build_feature_table(branch_root: str = "data/branches") -> pd.DataFrame:
                 wide["subject"] = subject
                 wide["condition"] = condition
                 wide["branch"] = branch
-                wide["recon_kind"] = recon_kind if recon_kind is not None else "n/a"
                 wide["recording"] = fif.stem
                 rows.append(wide.reset_index())
     if not rows:
@@ -82,12 +81,7 @@ def scatter_by(df: pd.DataFrame, xy: np.ndarray, color_col: str, title: str, out
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(7, 6))
-    categories = [c for c in df[color_col].unique() if c != "n/a"]
-    categories = sorted(categories)
-    if "n/a" in df[color_col].unique():
-        mask = df[color_col] == "n/a"
-        ax.scatter(xy[mask.to_numpy(), 0], xy[mask.to_numpy(), 1], s=10, c=MUTED_GRAY,
-                   label="n/a (raw)", alpha=0.5, linewidths=0)
+    categories = sorted(df[color_col].unique())
 
     palette = color_map or {cat: CATEGORICAL[i % len(CATEGORICAL)] for i, cat in enumerate(categories)}
     for cat in categories:
@@ -116,9 +110,9 @@ def main(branch_root: str = "data/branches", out_dir: str = "data/figures") -> p
                f"{out_dir}/tsne_by_subject.png")
     scatter_by(df, xy, "branch", "t-SNE of alpha-power windows, colored by branch (raw/denoised/upsampled)",
                f"{out_dir}/tsne_by_branch.png")
-    scatter_by(df, xy, "recon_kind", "t-SNE of alpha-power windows, colored by reconstruction kind",
-               f"{out_dir}/tsne_by_recon_kind.png",
-               color_map={"full_reconstruction": CATEGORICAL[0], "hybrid": CATEGORICAL[1]})
+    scatter_by(df, xy, "condition", "t-SNE of alpha-power windows, colored by eyes-closed vs eyes-open",
+               f"{out_dir}/tsne_by_condition.png",
+               color_map={"EC": CATEGORICAL[0], "EO": CATEGORICAL[1]})
     return df
 
 

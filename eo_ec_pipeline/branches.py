@@ -44,7 +44,7 @@ def build_branches(input_dir: str, out_root: str, gpu_device=0) -> None:
 
     print(f"branches written under {out_root}")
     print("  denoised -> read from denoised/full_reconstruction/*.fif (model output on all 4ch)")
-    print("  upsampled -> read from upsampled/hybrid/*.fif (real 4ch untouched + model-filled posterior ch)")
+    print("  upsampled -> read from upsampled/full_reconstruction/*.fif (all 8ch model output)")
 
 
 if __name__ == "__main__":
