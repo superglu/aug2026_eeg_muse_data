@@ -1,10 +1,10 @@
-# Can ZUNA clean up consumer EEG?
+# Does ZUNA1.1 Preserve Eyes-Open/Closed Brain State in Consumer EEG?
 
 Testing [ZUNA1.1](https://huggingface.co/Zyphra/ZUNA1.1) — Zyphra's 380M-parameter EEG foundation model — on two jobs: **denoising what a 4-electrode Muse 2 headband records, and synthesizing the electrodes it doesn't have.** Built on a live Python pipeline: [muselsl](https://github.com/alexandrebarachant/muse-lsl) + [LSL](https://labstreaminglayer.org) for streaming, [MNE-Python](https://mne.tools) for analysis.
 
-## 📊 Final results: `zuna_evaluation_v4.pdf`
+## Final results: [`zuna_evaluation.pdf`](https://docs.google.com/presentation/d/e/2PACX-1vTb3SMT55pQbxMg6K2t9O9sDF4XVddiJ1xbnsJ-ipfaXQLOCFupZ_kkqwFnaesYKojneG_LsuJBHcZ6/pub?start=false&loop=false&delayms=3000#slide=id.p1)
 
-**The evaluation deck is [`zuna_evaluation_v4.pdf`](zuna_evaluation_v4.pdf)** (18 slides: study design, reconstruction case studies, spectra, decoding, verdicts). The scoreboard:
+The scoreboard:
 
 | branch | EC−EO alpha (dB) | decode accuracy | verdict (draft) |
 |---|---|---|---|
@@ -26,8 +26,6 @@ Supporting artifacts: t-SNE and band-power figures in `data/figures/`, branch re
 
 | Path | What it is |
 |---|---|
-| `zuna_evaluation_v4.pdf` | **Final results deck** |
-| `zuna_evaluation.pptx` | Earlier working deck (raw figure exports) |
 | `ingestion/src/` | Live streaming: bridge (`stream_eeg.py`), session supervisor, contact watcher, live plot, recorder, first-pass MNE analysis |
 | `ingestion/` | `muse_to_fif.py` (CSV→.fif with EO/EC routing), `clean_eeg.py` (standalone ZUNA CLI), `eeg_io.py` helpers |
 | `eo_ec_pipeline/` | The evaluation pipeline: branches → features → classification, band-power check, t-SNE |
@@ -65,7 +63,7 @@ The `_open`/`_closed` suffixes matter: `muse_to_fif.py` routes files to `data/in
 
 ### Signal quality
 
-Good contact settles under ~60 µV std within a minute of wearing. Hard blinks spike AF7/AF8; jaw clenches flood TP9/TP10 — instant proof the pipeline is live. Wetting the skin behind the ears helps the TP electrodes. Historical note from collection day: **this unit's AF7 read noisy on most fits even after cleaning the strip** — treat AF7 with suspicion in analysis.
+Good contact settles under ~60 µV std within a minute of wearing. Hard blinks spike AF7/AF8; jaw clenches flood TP9/TP10 — instant proof the pipeline is live. Wetting the skin behind the ears helps the TP electrodes. Historical note from collection day: **this unit's AF7 read noisy on most fits even after cleaning the strip**.
 
 ## Data flow
 
@@ -89,14 +87,12 @@ python eo_ec_pipeline/latent_tsne.py
 
 Operational notes:
 
-- The four ZUNA branch reconstructions run **sequentially**: ~8 min per denoised stage, ~25–30 min per upsampled stage (~70 min total on an M-series Mac; torch routes to MPS). The real compute runs in a spawned child process — don't judge progress by the parent PID's CPU.
-- There is **no resume** — killing the pipeline mid-run redoes everything.
+- The four ZUNA branch reconstructions run **sequentially**: ~8 min per denoised stage, ~25–30 min per upsampled stage (~70 min total on an M-series Mac; torch routes to MPS).
 - Set `HF_HUB_OFFLINE=1` after the first run: unauthenticated Hugging Face requests can rate-limit and stall.
 - `ingestion/clean_eeg.py` remains the standalone ZUNA CLI for ad-hoc cleaning (`--repair-channels`, `--target-channels`, `--bad-segments`) into `fif_out/`.
 
 ## Caveats
 
-- **Research use only** — Zyphra explicitly disclaims medical/clinical validity for ZUNA1.1.
 - ZUNA inputs: 0.5–30 s segments; electrode positions required (`eeg_io.numpy_to_fif` attaches standard-1020).
 - Muse 2: 256 Hz; TP9 (left ear), AF7/AF8 (forehead), TP10 (right ear), plus AUX. macOS asks for Bluetooth permission for your terminal on first use.
 - muselsl can also publish PPG/accelerometer/gyro streams: `muselsl stream --ppg --acc --gyro`.
@@ -106,9 +102,6 @@ Operational notes:
 - [x] Bluetooth → LSL bridge, live console + plot consumers
 - [x] Hardware smoke test (256 Hz, 4 channels, verified live)
 - [x] Session recorder + MNE analysis (validated on synthetic 10 Hz alpha)
-- [x] Multi-participant collection tooling (supervisor, contact watcher, stability gate)
+- [x] Multi-participant collection tooling
 - [x] Eyes-open vs eyes-closed experiment, 4 subjects (alpha rose 1.3–5.7× with eyes closed, 4/4 subjects)
-- [x] ZUNA1.1 three-branch evaluation — **results in `zuna_evaluation_v4.pdf`**
-- [ ] Per-subject normalization for cross-subject EO/EC classification; more subjects
-- [ ] Marker stream publisher for stimulus/event timestamps
-- [ ] Optional: LabRecorder + XDF for multi-stream recordings once markers exist
+- [x] ZUNA1.1 three-branch evaluation — **results in `zuna_evaluation.pdf`**
