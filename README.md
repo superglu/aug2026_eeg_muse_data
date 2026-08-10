@@ -2,7 +2,7 @@
 
 Testing [ZUNA1.1](https://huggingface.co/Zyphra/ZUNA1.1) — Zyphra's 380M-parameter EEG foundation model — on two jobs: **denoising what a 4-electrode Muse 2 headband records, and synthesizing the electrodes it doesn't have.** Built on a live Python pipeline: [muselsl](https://github.com/alexandrebarachant/muse-lsl) + [LSL](https://labstreaminglayer.org) for streaming, [MNE-Python](https://mne.tools) for analysis.
 
-## Final results: [`zuna_evaluation.pdf`](https://docs.google.com/presentation/d/e/2PACX-1vTb3SMT55pQbxMg6K2t9O9sDF4XVddiJ1xbnsJ-ipfaXQLOCFupZ_kkqwFnaesYKojneG_LsuJBHcZ6/pub?start=false&loop=false&delayms=3000#slide=id.p1)
+## Final results: [`zuna_evaluation`](https://docs.google.com/presentation/d/e/2PACX-1vTb3SMT55pQbxMg6K2t9O9sDF4XVddiJ1xbnsJ-ipfaXQLOCFupZ_kkqwFnaesYKojneG_LsuJBHcZ6/pub?start=false&loop=false&delayms=3000#slide=id.p1)
 
 The scoreboard:
 
