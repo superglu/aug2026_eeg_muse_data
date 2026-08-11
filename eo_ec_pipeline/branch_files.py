@@ -74,7 +74,10 @@ def input_stems(condition: str) -> list[str]:
 def branch_fifs(branch_dir, condition: str) -> list[Path]:
     """Branch .fif files, one per current input recording, or an error explaining why not.
 
-    ZUNA may suffix its outputs, so a branch file is matched by input-stem prefix.
+    ZUNA may suffix its outputs, so a branch file is matched by input-stem prefix, to
+    the *longest* input stem it starts with: with inputs "gary_open" and "gary_open_2",
+    "gary_open_2"'s output prefix-matches both, and crediting it to "gary_open" would
+    let the shorter recording pass as built while its own output is missing.
     Files with no matching input are stale (the recording was removed) and are
     skipped with a warning rather than silently pooled into the results. The reverse
     -- an input recording this branch was never built for, the usual result of adding
@@ -83,6 +86,13 @@ def branch_fifs(branch_dir, condition: str) -> list[Path]:
     believes are included. A missing or empty branch directory is the same failure at
     full scale (the branch vanishes from the ranking entirely) and raises too, so a
     caller never has to guess whether an empty list means "absent" or "uninteresting".
+
+    Two branch files for one recording raise as well. Callers treat the result as one
+    file per recording (run_eo_ec_test.py gives each its own block id, and
+    classify.classify makes each block id a cross-validation group), so a second
+    output -- an MNE split part "<stem>-1.fif", a leftover from an earlier run under a
+    different suffix -- would enter the pool as a second, independent recording,
+    inflating both the group count and that subject's weight.
     """
     branch_dir = Path(branch_dir)
     found = sorted(branch_dir.glob("*.fif"))
@@ -100,16 +110,32 @@ def branch_fifs(branch_dir, condition: str) -> list[Path]:
             "— rebuild the branches (re-run without --skip-build)."
         )
 
-    current = [f for f in found if any(f.stem.startswith(s) for s in stems)]
-    stale = [f.name for f in found if f not in current]
+    matched: dict[str, list[Path]] = {s: [] for s in stems}
+    stale = []
+    for f in found:
+        # longest match wins: a stem that is itself a prefix of another stem must not
+        # claim the longer recording's output.
+        owner = max((s for s in stems if f.stem.startswith(s)), key=len, default=None)
+        if owner is None:
+            stale.append(f.name)
+        else:
+            matched[owner].append(f)
     if stale:
         print(f"WARNING: ignoring {len(stale)} stale file(s) in {branch_dir} "
               f"with no recording left in {CONDITION_INPUT_DIRS[condition]}: {stale}")
 
-    unbuilt = [s for s in stems if not any(f.stem.startswith(s) for f in current)]
+    unbuilt = [s for s in stems if not matched[s]]
     if unbuilt:
         raise FileNotFoundError(
             f"{len(unbuilt)} recording(s) in {CONDITION_INPUT_DIRS[condition]} have no output in "
             f"{branch_dir}: {unbuilt} — rebuild the branches (re-run without --skip-build)."
         )
-    return current
+    duplicated = {s: [f.name for f in fs] for s, fs in matched.items() if len(fs) > 1}
+    if duplicated:
+        raise FileNotFoundError(
+            f"{len(duplicated)} recording(s) in {CONDITION_INPUT_DIRS[condition]} have more than "
+            f"one output in {branch_dir}: {duplicated} — each would be pooled as a separate "
+            "recording. Delete the extra file(s), or clear the branch directory and rebuild "
+            "(re-run without --skip-build)."
+        )
+    return [matched[s][0] for s in stems]
