@@ -17,13 +17,18 @@ Without an explicit output path, the CSV filename is checked for "open"/"closed"
 and the .fif is routed to data/input_eo/ or data/input_ec/ accordingly, so the
 eo_ec_pipeline branch-comparison scripts can pick it straight up.
 
+The export is also checked against the 60-second block the study design specifies: a
+short block, or one that lost too many samples to dropouts, is refused rather than
+written as an ordinary .fif that nothing downstream can tell apart from a clean one.
+
 Usage:
     python muse_to_fif.py data/gary_open_2026-08-09.csv     # -> data/input_eo/gary_open_2026-08-09_raw.fif
     python muse_to_fif.py data/gary_closed_2026-08-09.csv   # -> data/input_ec/gary_closed_2026-08-09_raw.fif
     python muse_to_fif.py <input.csv> <output.fif>          # explicit output path, no routing
+    python muse_to_fif.py <input.csv> --allow-incomplete    # convert a short/gappy block anyway
 """
 
-import sys
+import argparse
 import warnings
 from pathlib import Path
 
@@ -39,6 +44,17 @@ MIND_MONITOR_TIME_COLUMN = "TimeStamp"
 
 # A sample interval this many times the median is treated as a dropout, not jitter.
 GAP_FACTOR = 5.0
+
+# The design is one 60-second block per condition per subject, and a short or gappy block
+# has to fail here rather than become an ordinary .fif: nothing downstream re-checks a
+# recording's length, classify.classify pools epochs unweighted (a 20 s block contributes
+# a third of the epochs and a third-sized cross-validation group), and spectral_check
+# weights every subject equally however little signal it kept. record_eeg.py enforces the
+# same two thresholds on the LSL path; a Mind Monitor export enters through here instead,
+# so the guard has to exist on both routes.
+EXPECTED_BLOCK_SECONDS = 60.0
+MIN_BLOCK_FRACTION = 0.9      # of EXPECTED_BLOCK_SECONDS
+MIN_SAMPLE_FRACTION = 0.9     # of the samples the wall-clock span should have yielded
 
 
 def route_output_dir(csv_path: str) -> Path:
@@ -82,7 +98,7 @@ def _timestamps_seconds(df: pd.DataFrame) -> np.ndarray:
     )
 
 
-def _sfreq_and_gaps(timestamps: np.ndarray, csv_path: str) -> tuple[float, mne.Annotations, float]:
+def sfreq_and_gaps(timestamps: np.ndarray, csv_path: str) -> tuple[float, mne.Annotations, float]:
     """Sampling rate, plus a BAD_gap annotation per dropout.
 
     RawArray assumes uniform sampling, so a dropout silently compresses the time
@@ -114,7 +130,38 @@ def _sfreq_and_gaps(timestamps: np.ndarray, csv_path: str) -> tuple[float, mne.A
     return sfreq, annotations, lost_s
 
 
-def muse_csv_to_fif(csv_path: str, out_fif: str) -> str:
+def check_block_complete(n_samples: int, sfreq: float, timestamps: np.ndarray, csv_path: str) -> None:
+    """Raise unless this export is a usable block, i.e. long enough and not full of holes.
+
+    Two independent ways an export falls short, both invisible in the resulting .fif:
+    the session was stopped early (short wall clock), or it ran the full minute but the
+    headset dropped a large share of it (samples missing from a full-length span). The
+    second is what BAD_gap annotations mark; annotating them keeps epoching honest, but
+    epoching alone cannot tell that only 35 s of a 60 s block survived.
+    """
+    signal_s = n_samples / sfreq
+    wall_s = float(timestamps[-1] - timestamps[0])
+    kept = signal_s / wall_s if wall_s > 0 else 1.0
+
+    problems = []
+    if signal_s < MIN_BLOCK_FRACTION * EXPECTED_BLOCK_SECONDS:
+        problems.append(
+            f"only {signal_s:.1f} s of signal, against the {EXPECTED_BLOCK_SECONDS:.0f} s "
+            f"block the design specifies ({signal_s / EXPECTED_BLOCK_SECONDS:.0%})"
+        )
+    if kept < MIN_SAMPLE_FRACTION:
+        problems.append(
+            f"kept {n_samples} samples, {kept:.0%} of the ~{wall_s * sfreq:.0f} that "
+            f"{wall_s:.1f} s at {sfreq:.1f} Hz should have yielded (dropouts)"
+        )
+    if problems:
+        raise ValueError(
+            f"INCOMPLETE RECORDING {csv_path}: {'; '.join(problems)}. Re-record this block, "
+            "or pass --allow-incomplete to convert it anyway and flag it in the writeup."
+        )
+
+
+def muse_csv_to_fif(csv_path: str, out_fif: str, allow_incomplete: bool = False) -> str:
     df = pd.read_csv(csv_path)
 
     columns = _channel_columns(df)
@@ -126,13 +173,18 @@ def muse_csv_to_fif(csv_path: str, out_fif: str) -> str:
     if len(df) < 2:
         raise ValueError(f"{csv_path} has fewer than 2 EEG samples")
 
-    sfreq, annotations, lost_s = _sfreq_and_gaps(timestamps, csv_path)
+    sfreq, annotations, lost_s = sfreq_and_gaps(timestamps, csv_path)
     if len(annotations):
         warnings.warn(
             f"{csv_path}: {len(annotations)} recording gap(s) totalling {lost_s:.1f} s "
             f"({100 * lost_s / (timestamps[-1] - timestamps[0]):.1f}% of wall clock) — "
             "marked BAD_gap; the .fif time axis is that much shorter than the session."
         )
+    if allow_incomplete:
+        warnings.warn(f"{csv_path}: completeness check skipped (--allow-incomplete); "
+                      "flag this block as short/gappy wherever its results are reported.")
+    else:
+        check_block_complete(len(df), sfreq, timestamps, csv_path)
 
     # Muse CSV values are in microvolts; MNE expects volts.
     data_v = df[[columns[ch] for ch in MUSE_EEG_CHANNELS]].to_numpy(dtype=float).T * 1e-6
@@ -142,12 +194,17 @@ def muse_csv_to_fif(csv_path: str, out_fif: str) -> str:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        sys.exit("usage: python muse_to_fif.py <input.csv> [output.fif]")
-    csv_path = sys.argv[1]
-    if len(sys.argv) > 2:
-        out_fif = sys.argv[2]
-    else:
-        out_fif = str(route_output_dir(csv_path) / f"{Path(csv_path).stem}_raw.fif")
-    path = muse_csv_to_fif(csv_path, out_fif)
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("csv", help="Muse CSV export (record_eeg.py or Mind Monitor)")
+    parser.add_argument("out_fif", nargs="?", default=None,
+                        help="explicit output path; omit to route on 'open'/'closed' in the name")
+    parser.add_argument("--allow-incomplete", action="store_true",
+                        help=f"convert even if the block is shorter than "
+                             f"{MIN_BLOCK_FRACTION:.0%} of {EXPECTED_BLOCK_SECONDS:.0f} s or lost "
+                             f"more than {1 - MIN_SAMPLE_FRACTION:.0%} of its samples to dropouts")
+    args = parser.parse_args()
+
+    out_fif = args.out_fif or str(route_output_dir(args.csv) / f"{Path(args.csv).stem}_raw.fif")
+    path = muse_csv_to_fif(args.csv, out_fif, allow_incomplete=args.allow_incomplete)
     print(f"wrote {path}")

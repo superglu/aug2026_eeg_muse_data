@@ -58,8 +58,21 @@ def spectral_check(df: pd.DataFrame) -> pd.DataFrame:
     values instead makes this the mean of the effect over subjects. Subjects missing one
     of the two conditions have no effect to contribute and are excluded.
     """
-    per_subject = per_subject_spectral_check(df).dropna(subset=["EC_minus_EO_db"])
-    return per_subject.groupby(["branch", "channel"]).agg(
+    per_subject = per_subject_spectral_check(df)
+    paired = per_subject.dropna(subset=["EC_minus_EO_db"])
+    if paired.empty:
+        # Every subject missing a condition is not "nothing interesting to report": it is
+        # the headline metric of the study vanishing. It happens whenever subject_key
+        # mis-keys the recordings (the two conditions then land under different subjects),
+        # so it has to fail like band_power_check._recordings_by_subject does rather than
+        # print an empty table.
+        raise ValueError(
+            "No subject has both an EC and an EO recording, so there is no EC-EO effect "
+            f"to report. Subjects keyed from block_idx: {sorted(per_subject['subject'].unique())} "
+            "— check that each recording's filename carries its subject and exactly one of "
+            "'open'/'closed' (see branch_files.subject_key)."
+        )
+    return paired.groupby(["branch", "channel"]).agg(
         EC=("EC", "mean"),
         EO=("EO", "mean"),
         EC_minus_EO_db=("EC_minus_EO_db", "mean"),

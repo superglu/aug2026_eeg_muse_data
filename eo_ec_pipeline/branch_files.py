@@ -32,8 +32,15 @@ def subject_key(name: str) -> str:
     The design is paired (one EO and one EC block per subject), but nothing in the
     filesystem layout records the pairing: the condition lives in the folder, and
     the subject only in the filename. muse_to_fif.py routes on "open"/"closed"
-    appearing in the export name, so the subject is what precedes that marker --
-    "gary_closed_2026-08-09_raw" and "gary_open_2026-08-09_raw" both key to "gary".
+    appearing in the export name, so the subject is the rest of the name once that
+    marker is removed --
+    "gary_closed_2026-08-09_raw" and "gary_open_2026-08-09_raw" both key to "gary",
+    and "closed_gary_2026-08-09" and "open_gary_2026-08-09" both key to
+    "gary_2026-08-09". The README only requires the marker to appear somewhere in the
+    name, so a leading marker has to be handled: taking the text before it and falling
+    back to the first underscore token would return the marker itself, keying every EC
+    recording to "closed" and every EO one to "open" -- two condition-shaped
+    pseudo-subjects that each hold a single condition, so every EC-EO contrast is NaN.
     A block id built as "<condition>_<stem>" (run_eo_ec_test.py) is accepted too.
     Names without the marker fall back to their first underscore-separated token.
     """
@@ -44,8 +51,18 @@ def subject_key(name: str) -> str:
             stem, lowered = stem[len(prefix):], lowered[len(prefix):]
     for marker in ("closed", "open"):
         cut = lowered.find(marker)
-        if cut != -1:
-            return lowered[:cut].strip("_- ") or lowered.split("_")[0]
+        if cut == -1:
+            continue
+        before = lowered[:cut].strip("_- ")
+        if before:
+            return before
+        after = lowered[cut + len(marker):].strip("_- ")
+        if after:
+            return after
+        raise ValueError(
+            f"{name!r} is nothing but the condition marker {marker!r}: it names no "
+            "subject, so its EO and EC recordings could never be paired."
+        )
     return lowered.split("_")[0]
 
 

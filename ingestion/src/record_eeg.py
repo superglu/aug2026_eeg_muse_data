@@ -19,6 +19,15 @@ from pylsl import StreamInlet, local_clock, resolve_byprop
 
 CHANNEL_NAMES = ["TP9", "AF7", "AF8", "TP10", "AUX"]
 
+# pull_chunk returning nothing is normal jitter for a moment and a dead headset after
+# this long, so a dropped Bluetooth link stops the recording instead of padding the
+# wall clock with silence (which --duration 0 would otherwise do forever).
+QUIET_TIMEOUT = 5.0
+
+# A block that kept fewer than this share of sampling_rate * duration samples is not a
+# usable block: the missing time is a dropout, and the CSV looks complete without it.
+MIN_SAMPLE_FRACTION = 0.9
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Record Muse 2 EEG from LSL to CSV")
@@ -49,7 +58,9 @@ def main() -> None:
 
     n_samples = 0
     started = local_clock()
+    last_sample_at = started
     next_report = 5.0
+    went_quiet = False
     try:
         with open(out_path, "w", newline="") as f:
             writer = csv.writer(f)
@@ -60,10 +71,16 @@ def main() -> None:
                     writer.writerow([f"{ts:.6f}"] + [f"{v:.3f}" for v in sample])
                 n_samples += len(chunk)
 
-                elapsed = local_clock() - started
+                now = local_clock()
+                if chunk:
+                    last_sample_at = now
+                elapsed = now - started
                 if elapsed >= next_report:
                     print(f"  {elapsed:6.1f} s  {n_samples} samples")
                     next_report += 5.0
+                if now - last_sample_at >= QUIET_TIMEOUT:
+                    went_quiet = True
+                    break
                 if args.duration is not None and elapsed >= args.duration:
                     break
     except KeyboardInterrupt:
@@ -71,6 +88,22 @@ def main() -> None:
 
     elapsed = local_clock() - started
     print(f"\nSaved {n_samples} samples ({elapsed:.1f} s) to {out_path}")
+
+    # An incomplete block has to fail loudly: the CSV is a plausible-looking short
+    # recording, and averaging it in with the full ones is exactly the contamination
+    # the collection checklist says must be flagged rather than silently absorbed.
+    problems = []
+    if went_quiet:
+        problems.append(f"the stream went quiet for {QUIET_TIMEOUT:.0f} s (headset or bridge dropped)")
+    if args.duration is not None and sampling_rate > 0:
+        expected = sampling_rate * args.duration
+        if n_samples < MIN_SAMPLE_FRACTION * expected:
+            problems.append(f"kept {n_samples} of the ~{expected:.0f} samples "
+                            f"{args.duration:.0f} s at {sampling_rate:.0f} Hz should yield "
+                            f"({n_samples / expected:.0%})")
+    if problems:
+        raise SystemExit(f"\nINCOMPLETE RECORDING: {'; '.join(problems)}.\n"
+                         f"{out_path} is short — re-record this block before analysing it.")
 
 
 if __name__ == "__main__":

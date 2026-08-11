@@ -8,6 +8,7 @@ Run with the venv that has zuna installed:
   eeg/bin/python3 branches.py data/labeled data/branches
 """
 
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -87,7 +88,15 @@ def _propagate_annotations(input_dir, out_dir) -> None:
             description=[GAP_DESCRIPTION] * len(missing),
         )
         out.set_annotations(kept, verbose="ERROR")
-        out.save(out_fif, overwrite=True, verbose="ERROR")
+        # Write beside the original and rename into place: MNE refuses to save a Raw onto
+        # the file it was read from, and an in-place write that failed partway would leave
+        # a truncated .fif that branch_fifs() would still hand to features.py by name.
+        tmp_fif = out_fif.with_name(f".tmp_{out_fif.stem}_raw.fif")
+        try:
+            out.save(tmp_fif, overwrite=True, verbose="ERROR")
+            os.replace(tmp_fif, out_fif)
+        finally:
+            tmp_fif.unlink(missing_ok=True)
         print(f"  re-applied {len(missing)} {GAP_DESCRIPTION} annotation(s) "
               f"from {inputs[stem].name} -> {out_fif.name}")
 
