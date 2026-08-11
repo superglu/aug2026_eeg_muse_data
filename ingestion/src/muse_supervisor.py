@@ -28,11 +28,27 @@ import threading
 import time
 from queue import Empty, Queue
 
+# Printed by muselsl.stream once the LSL outlet is live ("Streaming EEG...").
 STREAMING_MARKER = "Streaming"
+# Every line the worker itself logs carries this prefix. Those lines quote
+# device-supplied text (BLE names/addresses), so the parent must never read a
+# stream marker out of them — otherwise a device advertising itself as
+# "Streaming" would disable the connect watchdog before any connection exists.
+LOG_PREFIX = "[supervisor "
+
+
+def _quote(text: str) -> str:
+    """Escape device-supplied text so it cannot forge lines in the log stream."""
+    return repr(str(text))
 
 
 def log(msg: str) -> None:
-    print(f"[supervisor {time.strftime('%H:%M:%S')}] {msg}", flush=True)
+    print(f"{LOG_PREFIX}{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def is_streaming_line(line: str) -> bool:
+    """True only for muselsl's own stream announcement, not for worker log lines."""
+    return not line.startswith(LOG_PREFIX) and line.lstrip().startswith(STREAMING_MARKER)
 
 
 def worker(address: str | None) -> None:
@@ -45,15 +61,16 @@ def worker(address: str | None) -> None:
         log("NO MUSE advertising — headset is off, asleep, or connected elsewhere (phone app?)")
         return
 
-    names = ", ".join(f"{m['name']} at {m['address']}" for m in muses)
+    names = ", ".join(f"{_quote(m['name'])} at {_quote(m['address'])}" for m in muses)
     log(f"MUSE VISIBLE: {names}")
 
     if address and not any(m["address"] == address for m in muses):
-        log(f"address changed: configured {address} not seen — switching to {muses[0]['address']}")
+        log(f"address changed: configured {_quote(address)} not seen — "
+            f"switching to {_quote(muses[0]['address'])}")
         address = None
     address = address or muses[0]["address"]
 
-    log(f"connecting to {address}")
+    log(f"connecting to {_quote(address)}")
     stream(address)  # blocks until the headset disconnects; prints "Streaming EEG..."
     log("headset disconnected")
 
@@ -80,7 +97,7 @@ def supervise(address: str | None, connect_timeout: float) -> None:
                 break
             if line:
                 print(line, end="", flush=True)
-                if STREAMING_MARKER in line:
+                if is_streaming_line(line):
                     streaming = True
             if not streaming and time.monotonic() - started > connect_timeout:
                 log(f"WATCHDOG: no stream after {connect_timeout:.0f} s — killing stuck worker and retrying")

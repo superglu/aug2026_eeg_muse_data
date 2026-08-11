@@ -18,7 +18,8 @@ import mne
 import numpy as np
 import pandas as pd
 
-CONDITION_DIRS = {"EC": "data/input_ec", "EO": "data/input_eo"}
+from branch_files import CONDITION_INPUT_DIRS
+
 BANDS = {
     "delta": (1.0, 4.0),
     "theta": (4.0, 8.0),
@@ -29,11 +30,23 @@ BANDS = {
 COLORS = {"EC": "#2a78d6", "EO": "#eb6834"}  # validated categorical slots 1 & 2
 
 
+def integrated_band_power(power: np.ndarray, freqs: np.ndarray, fmin: float, fmax: float) -> float:
+    """Power in [fmin, fmax) — the PSD integrated over the band, not its mean.
+
+    Bandwidths here differ by ~5x (delta 3 Hz vs beta 17 Hz), so a mean PSD value
+    discards exactly the factor that makes bands comparable: a ratio of per-band
+    means over-credits the narrow low-frequency bands and is not a fraction of
+    total power at all.
+    """
+    mask = (freqs >= fmin) & (freqs < fmax)
+    return float(np.trapezoid(power[mask], freqs[mask]))
+
+
 def band_power_table(fif_paths_by_condition: dict) -> pd.DataFrame:
-    """Relative band power (each band's mean power as a fraction of total 1-45Hz
-    power), same convention as ingestion/src/analyze_session.py -- gives every
-    band a meaningful, comparable 0-1 baseline instead of raw (very negative,
-    arbitrarily-offset) log power."""
+    """Relative band power: each band's integrated power as a fraction of the
+    total 1-45Hz power, same convention as ingestion/src/analyze_session.py --
+    gives every band a meaningful, comparable 0-1 baseline instead of raw (very
+    negative, arbitrarily-offset) log power."""
     rows = []
     for condition, fif_paths in fif_paths_by_condition.items():
         for fif_path in fif_paths:
@@ -42,7 +55,7 @@ def band_power_table(fif_paths_by_condition: dict) -> pd.DataFrame:
             freqs = psd.freqs
             power = psd.get_data().mean(axis=0)  # mean over channels, (n_freqs,)
 
-            band_power = {band: power[(freqs >= fmin) & (freqs < fmax)].mean()
+            band_power = {band: integrated_band_power(power, freqs, fmin, fmax)
                           for band, (fmin, fmax) in BANDS.items()}
             total = sum(band_power.values())
             for band, p in band_power.items():
@@ -92,7 +105,7 @@ def plot_band_power(df: pd.DataFrame, out_png: str) -> None:
 
 def main(max_per_condition: int = 2, out_png: str = "data/figures/band_power_eo_ec.png") -> pd.DataFrame:
     fif_paths_by_condition = {}
-    for condition, input_dir in CONDITION_DIRS.items():
+    for condition, input_dir in CONDITION_INPUT_DIRS.items():
         fifs = sorted(Path(input_dir).glob("*.fif"))[:max_per_condition]
         if not fifs:
             raise FileNotFoundError(f"No .fif files found in {input_dir} ({condition})")

@@ -52,7 +52,10 @@ def main() -> None:
         "delta": (1, 4), "theta": (4, 8), "alpha": (8, 13),
         "beta": (13, 30), "gamma": (30, 50),
     }.items():
-        band_powers[band] = psds[:, (freqs >= lo) & (freqs < hi)].mean()
+        # Integrate over the band (not mean it): bandwidths differ by ~6x here, so a
+        # ratio of per-band means is not a fraction of total power.
+        mask = (freqs >= lo) & (freqs < hi)
+        band_powers[band] = float(np.trapezoid(psds[:, mask].mean(axis=0), freqs[mask]))
     total = sum(band_powers.values())
     print("\nRelative band power (all channels):")
     for band, power in band_powers.items():

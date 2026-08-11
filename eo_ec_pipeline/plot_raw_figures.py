@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import mne
 import numpy as np
 
-CONDITION_DIRS = {"EC": "data/input_ec", "EO": "data/input_eo"}
+from branch_files import CONDITION_INPUT_DIRS
 
 
 def plot_raw_figure(fif_path, out_path, title, demean: bool = True) -> Path:
@@ -63,7 +63,7 @@ def plot_raw_figure(fif_path, out_path, title, demean: bool = True) -> Path:
 
 def main(branch_root: str = "data/branches") -> None:
     branch_root = Path(branch_root)
-    for condition, input_dir in CONDITION_DIRS.items():
+    for condition, input_dir in CONDITION_INPUT_DIRS.items():
         fifs = sorted(Path(input_dir).glob("*.fif"))
         if not fifs:
             print(f"no files under {input_dir}; skipping {condition}")

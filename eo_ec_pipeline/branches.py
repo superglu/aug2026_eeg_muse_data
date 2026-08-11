@@ -21,6 +21,12 @@ POSTERIOR_TARGETS = ["O1", "O2", "Oz", "Pz"]  # the channels Muse doesn't have
 def build_branches(input_dir: str, out_root: str, gpu_device=0) -> None:
     out_root = Path(out_root)
 
+    # Wipe previous output first: these directories are read back by globbing, so a
+    # recording dropped from input_dir since the last run would otherwise survive
+    # here and keep being pooled into the results.
+    for stale in ("raw", "denoised", "denoised_figures", "upsampled", "upsampled_figures"):
+        shutil.rmtree(out_root / stale, ignore_errors=True)
+
     raw_dir = out_root / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     for fif in Path(input_dir).glob("*.fif"):
