@@ -22,19 +22,28 @@ Usage:
 """
 
 import argparse
+import contextlib
 import subprocess
 import sys
 import threading
 import time
 from queue import Empty, Queue
 
-# Printed by muselsl.stream once the LSL outlet is live ("Streaming EEG...").
-STREAMING_MARKER = "Streaming"
-# Every line the worker itself logs carries this prefix. Those lines quote
-# device-supplied text (BLE names/addresses), so the parent must never read a
-# stream marker out of them — otherwise a device advertising itself as
-# "Streaming" would disable the connect watchdog before any connection exists.
+# Every line the worker itself logs carries this prefix, and nothing else in the worker's
+# output may: muselsl's own prints embed device-supplied text (BLE names are arbitrary
+# bytes, embedded newlines included), so they are escaped and re-tagged before being
+# forwarded. No text is trusted to mean "streaming" either — muselsl prints
+# "Streaming EEG..." when the outlet is live, but a device advertising itself as
+# "\nStreaming" would print the same thing before any connection exists, so the worker
+# confirms the outlet through LSL instead (see _confirm_stream_when_live).
 LOG_PREFIX = "[supervisor "
+# Tag on muselsl's escaped output, so its origin is visible in the combined log.
+UNTRUSTED_PREFIX = "[muselsl] "
+# Logged by the worker once it has resolved the live LSL outlet for the connected
+# headset. This is the only text that turns the parent's connect watchdog off.
+STREAM_CONFIRMED = "STREAM CONFIRMED"
+# How often the worker re-checks for its outlet while muselsl is connecting.
+OUTLET_POLL_SEC = 2.0
 
 
 def _quote(text: str) -> str:
@@ -42,21 +51,79 @@ def _quote(text: str) -> str:
     return repr(str(text))
 
 
+def _log_line(msg: str) -> str:
+    return f"{LOG_PREFIX}{time.strftime('%H:%M:%S')}] {msg}"
+
+
 def log(msg: str) -> None:
-    print(f"{LOG_PREFIX}{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+    print(_log_line(msg), flush=True)
 
 
 def is_streaming_line(line: str) -> bool:
-    """True only for muselsl's own stream announcement, not for worker log lines."""
-    return not line.startswith(LOG_PREFIX) and line.lstrip().startswith(STREAMING_MARKER)
+    """True only for the worker's own confirmation that its LSL outlet went live."""
+    return line.startswith(LOG_PREFIX) and line.rstrip().endswith(STREAM_CONFIRMED)
+
+
+class _UntrustedOutput:
+    """Line-buffered stdout/stderr proxy for everything muselsl prints.
+
+    muselsl's output carries device-supplied text verbatim, so each line is escaped
+    (which also flattens embedded newlines) and tagged before it reaches the parent.
+    Nothing that passes through here can look like a supervisor log line, so no
+    advertised BLE name can forge one.
+    """
+
+    def __init__(self, out):
+        self._out = out
+        self._buf = ""
+
+    def write(self, chunk: str) -> int:
+        self._buf += chunk
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            self._emit(line)
+        return len(chunk)
+
+    def _emit(self, line: str) -> None:
+        self._out.write(f"{UNTRUSTED_PREFIX}{_quote(line)}\n")
+        self._out.flush()
+
+    def flush(self) -> None:
+        if self._buf:
+            self._emit(self._buf)
+            self._buf = ""
+        self._out.flush()
+
+
+def _confirm_stream_when_live(address: str, out) -> None:
+    """Log STREAM_CONFIRMED once this headset's LSL outlet actually resolves.
+
+    Polling the outlet is the only check no advertising device can spoof: the
+    watchdog is disarmed by an outlet that exists on the machine and carries the
+    address we chose to connect to, not by a string somebody printed. Writes to the
+    real stdout, which the worker keeps out of the muselsl redirect for this reason.
+    """
+    from pylsl import resolve_byprop
+
+    while True:
+        streams = resolve_byprop("type", "EEG", timeout=OUTLET_POLL_SEC)
+        if any(address in s.source_id() for s in streams):
+            out.write(_log_line(STREAM_CONFIRMED) + "\n")
+            out.flush()
+            return
+        time.sleep(OUTLET_POLL_SEC)
 
 
 def worker(address: str | None) -> None:
     """One scan+connect+stream cycle. Runs in a child process."""
     from muselsl import list_muses, stream
 
+    untrusted = _UntrustedOutput(sys.stdout)
+
     log("scanning...")
-    muses = list_muses()
+    with contextlib.redirect_stdout(untrusted), contextlib.redirect_stderr(untrusted):
+        muses = list_muses()
+    untrusted.flush()
     if not muses:
         log("NO MUSE advertising — headset is off, asleep, or connected elsewhere (phone app?)")
         return
@@ -71,7 +138,10 @@ def worker(address: str | None) -> None:
     address = address or muses[0]["address"]
 
     log(f"connecting to {_quote(address)}")
-    stream(address)  # blocks until the headset disconnects; prints "Streaming EEG..."
+    threading.Thread(target=_confirm_stream_when_live, args=(address, sys.stdout), daemon=True).start()
+    with contextlib.redirect_stdout(untrusted), contextlib.redirect_stderr(untrusted):
+        stream(address)  # blocks until the headset disconnects
+    untrusted.flush()
     log("headset disconnected")
 
 

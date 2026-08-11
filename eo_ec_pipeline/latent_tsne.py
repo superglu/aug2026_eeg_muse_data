@@ -20,7 +20,6 @@ three plots just recolor the same 2D layout.
 """
 
 import argparse
-import warnings
 from pathlib import Path
 
 import numpy as np
@@ -45,11 +44,9 @@ def build_feature_table(branch_root: str = "data/branches") -> pd.DataFrame:
     for condition in CONDITION_INPUT_DIRS:
         for branch, subdir in VARIANTS:
             variant_dir = branch_root / condition / subdir
-            fifs = branch_fifs(variant_dir, condition)
-            if not fifs:
-                warnings.warn(f"no files under {variant_dir}; skipping this variant/condition")
-                continue
-            for fif in fifs:
+            # branch_fifs raises on a missing/unbuilt variant: a variant silently dropped
+            # here would recolor the same embedding as if it had never been requested.
+            for fif in branch_fifs(variant_dir, condition):
                 subject = fif.stem.split("_")[0]
                 block_id = f"{condition}_{branch}_{fif.stem}"
                 df = extract_features(str(fif), branch, condition=condition, block_id=block_id)
