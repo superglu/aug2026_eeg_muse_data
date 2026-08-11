@@ -10,8 +10,8 @@ then extracts alpha-power features from the full_reconstruction .fif of each of 
 three branches (hybrid is skipped for both -- identical to full_reconstruction for
 denoised, and full_reconstruction is used instead of hybrid for upsampled here for a
 consistent "model regenerates everything" comparison across both). One group per
-recording, so GroupKFold in classify.py never splits epochs from the same file across
-folds.
+recording, so StratifiedGroupKFold in classify.py never splits epochs from the same
+file across folds.
 
   eeg/bin/python3 eo_ec_pipeline/run_eo_ec_test.py
   eeg/bin/python3 eo_ec_pipeline/run_eo_ec_test.py --gpu-device ""   # CPU
@@ -22,16 +22,10 @@ from pathlib import Path
 
 import pandas as pd
 
+from branch_files import BRANCH_SUBDIR, CONDITION_INPUT_DIRS, branch_fifs
 from branches import build_branches
 from classify import classify, spectral_check
 from features import extract_features
-
-CONDITION_INPUT_DIRS = {"EC": "data/input_ec", "EO": "data/input_eo"}
-BRANCH_SUBDIR = {
-    "raw": "raw",
-    "denoised": "denoised/full_reconstruction",
-    "upsampled": "upsampled/full_reconstruction",
-}
 
 
 def run_eo_ec_test(branch_root: str = "data/branches", gpu_device=0, skip_build: bool = False) -> pd.DataFrame:
@@ -48,7 +42,7 @@ def run_eo_ec_test(branch_root: str = "data/branches", gpu_device=0, skip_build:
     for condition in CONDITION_INPUT_DIRS:
         for branch, subdir in BRANCH_SUBDIR.items():
             branch_dir = branch_root / condition / subdir
-            for fif in sorted(branch_dir.glob("*.fif")):
+            for fif in branch_fifs(branch_dir, condition):
                 block_id = f"{condition}_{fif.stem}"
                 dfs.append(extract_features(str(fif), branch, condition=condition, block_id=block_id))
 
@@ -61,7 +55,7 @@ def run_eo_ec_test(branch_root: str = "data/branches", gpu_device=0, skip_build:
     print("=== Spectral sanity check: EC - EO log-alpha-power (dB) per channel ===")
     print(spectral_check(df).to_string(index=False))
     print()
-    print("=== Classification accuracy per branch (GroupKFold by recording) ===")
+    print("=== Classification accuracy per branch (StratifiedGroupKFold by recording) ===")
     print(classify(df).to_string(index=False))
     return df
 

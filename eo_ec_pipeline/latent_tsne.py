@@ -28,17 +28,13 @@ import pandas as pd
 from sklearn.manifold import TSNE
 from sklearn.preprocessing import StandardScaler
 
+from branch_files import BRANCH_SUBDIR, CONDITION_INPUT_DIRS, branch_fifs
 from features import extract_features
 
 REAL_CHANNELS = ["TP9", "AF7", "AF8", "TP10"]
-CONDITION_DIRS = {"EC": "data/input_ec", "EO": "data/input_eo"}
 
 # (branch, subdir-under-data/branches/<condition>/)
-VARIANTS = [
-    ("raw", "raw"),
-    ("denoised", "denoised/full_reconstruction"),
-    ("upsampled", "upsampled/full_reconstruction"),
-]
+VARIANTS = list(BRANCH_SUBDIR.items())
 
 CATEGORICAL = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]  # validated slots 1-4
 
@@ -46,10 +42,10 @@ CATEGORICAL = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]  # validated slots 1-
 def build_feature_table(branch_root: str = "data/branches") -> pd.DataFrame:
     branch_root = Path(branch_root)
     rows = []
-    for condition in CONDITION_DIRS:
+    for condition in CONDITION_INPUT_DIRS:
         for branch, subdir in VARIANTS:
             variant_dir = branch_root / condition / subdir
-            fifs = sorted(variant_dir.glob("*.fif"))
+            fifs = branch_fifs(variant_dir, condition)
             if not fifs:
                 warnings.warn(f"no files under {variant_dir}; skipping this variant/condition")
                 continue

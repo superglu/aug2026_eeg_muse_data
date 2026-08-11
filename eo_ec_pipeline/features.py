@@ -2,14 +2,10 @@
 Epoch a branch's .fif into fixed windows, compute per-epoch per-channel alpha-band
 (8-13 Hz) log-power via Welch PSD, and write a tidy feature table for classify.py.
 
-Two ways to determine condition/blocks for a file:
-  - annotation mode (default): the file carries EC/EO block annotations (from
-    convert_and_label.py) and each block becomes its own group for GroupKFold.
-  - whole-file mode (--condition): the entire recording is one condition (e.g. a
-    file living in data/input_ec == EC or data/input_eo == EO) and the file itself
-    (via --block-id, default the filename stem) is the group.
+The whole recording is one condition (a file living in data/input_ec == EC or
+data/input_eo == EO) and the file itself (via --block-id, default the filename
+stem) is the group used by StratifiedGroupKFold in classify.py.
 
-  eeg/bin/python3 features.py <fif_path> <branch_name> <out_csv>
   eeg/bin/python3 features.py <fif_path> <branch_name> <out_csv> --condition EC
 """
 
@@ -43,20 +39,10 @@ def _epoch_rows(seg, branch: str, block_idx, condition: str) -> list[dict]:
     return rows
 
 
-def extract_features(fif_path: str, branch: str, condition: str | None = None, block_id=None) -> pd.DataFrame:
+def extract_features(fif_path: str, branch: str, condition: str, block_id=None) -> pd.DataFrame:
     raw = mne.io.read_raw_fif(fif_path, preload=True, verbose="ERROR")
-
-    if condition is not None:
-        block_id = block_id if block_id is not None else Path(fif_path).stem
-        rows = _epoch_rows(raw, branch, block_id, condition)
-    else:
-        rows = []
-        for block_idx, ann in enumerate(raw.annotations):
-            if ann["description"] not in ("EC", "EO"):
-                continue
-            seg = raw.copy().crop(tmin=ann["onset"], tmax=ann["onset"] + ann["duration"], include_tmax=False)
-            rows += _epoch_rows(seg, branch, block_idx, ann["description"])
-    return pd.DataFrame(rows)
+    block_id = block_id if block_id is not None else Path(fif_path).stem
+    return pd.DataFrame(_epoch_rows(raw, branch, block_id, condition))
 
 
 if __name__ == "__main__":
@@ -64,8 +50,8 @@ if __name__ == "__main__":
     parser.add_argument("fif_path")
     parser.add_argument("branch")
     parser.add_argument("out_csv")
-    parser.add_argument("--condition", choices=["EC", "EO"], default=None,
-                         help="treat the whole file as this single condition instead of reading EC/EO annotations")
+    parser.add_argument("--condition", choices=["EC", "EO"], required=True,
+                         help="the single condition this whole recording was collected under")
     parser.add_argument("--block-id", default=None, help="group id for this file (default: filename stem)")
     args = parser.parse_args()
 
