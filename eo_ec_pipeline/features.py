@@ -27,7 +27,11 @@ def _epoch_rows(seg, branch: str, block_idx, condition: str) -> list[dict]:
     # the 8-13 Hz band, i.e. straight into the EC-EO numbers this table feeds.
     epochs = mne.make_fixed_length_epochs(seg, duration=EPOCH_SEC, overlap=0.0, preload=True,
                                           reject_by_annotation=True, verbose="ERROR")
-    psd = epochs.compute_psd(fmin=ALPHA_BAND[0], fmax=ALPHA_BAND[1], verbose="ERROR")
+    # method="welch" is explicit, not defaulted: Epochs.compute_psd defaults to multitaper,
+    # whose time-bandwidth smoothing on 2s windows drags power from outside 8-13 Hz into the
+    # alpha estimate. Welch is what this module documents and what band_power_check.py uses
+    # (Raw.compute_psd, which does default to Welch), so the two spectral checks stay comparable.
+    psd = epochs.compute_psd(method="welch", fmin=ALPHA_BAND[0], fmax=ALPHA_BAND[1], verbose="ERROR")
     alpha_power = psd.get_data().mean(axis=-1)  # (n_epochs, n_channels), mean linear power over alpha bins
 
     rows = []

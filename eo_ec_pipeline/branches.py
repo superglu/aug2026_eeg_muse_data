@@ -12,10 +12,50 @@ import shutil
 import sys
 from pathlib import Path
 
+import mne
 from zuna import reconstruct_fif
 
 MUSE_CHANNELS = ["TP9", "AF7", "AF8", "TP10"]
 POSTERIOR_TARGETS = ["O1", "O2", "Oz", "Pz"]  # the channels Muse doesn't have
+
+
+def _propagate_annotations(input_dir, out_dir) -> None:
+    """Copy each input recording's annotations onto the branch output built from it.
+
+    features.py epochs with reject_by_annotation=True so that the window straddling a
+    Bluetooth dropout (marked BAD_gap by ingestion/muse_to_fif.py) is dropped. The raw
+    branch is a file copy and keeps those annotations; the ZUNA branches are new .fif
+    files that need not. Without this, gap-straddling epochs would be rejected in raw
+    only, feeding step-artifact power into exactly the branches raw is compared against
+    and leaving the branches with unequal epoch counts. Outputs that already carry
+    annotations are left alone.
+    """
+    inputs = {p.stem: p for p in Path(input_dir).glob("*.fif")}
+    # longest stem first: ZUNA suffixes its outputs, so match the most specific input
+    stems = sorted(inputs, key=len, reverse=True)
+
+    for out_fif in sorted(Path(out_dir).rglob("*.fif")):
+        stem = next((s for s in stems if out_fif.stem.startswith(s)), None)
+        if stem is None:
+            continue
+
+        src = mne.io.read_raw_fif(inputs[stem], preload=False, verbose="ERROR")
+        if len(src.annotations) == 0:
+            continue
+
+        out = mne.io.read_raw_fif(out_fif, preload=True, verbose="ERROR")
+        if len(out.annotations) > 0:  # ZUNA carried them through; don't duplicate
+            continue
+
+        # Re-express onsets relative to the start of the data, so they land in the right
+        # place whether or not the output kept the input's meas_date and first_samp.
+        offset = src.first_time if src.annotations.orig_time is not None else 0.0
+        out.set_annotations(mne.Annotations(onset=src.annotations.onset - offset,
+                                            duration=src.annotations.duration,
+                                            description=src.annotations.description),
+                            verbose="ERROR")
+        out.save(out_fif, overwrite=True, verbose="ERROR")
+        print(f"  re-applied {len(src.annotations)} annotation(s) from {inputs[stem].name} -> {out_fif.name}")
 
 
 def build_branches(input_dir: str, out_root: str, gpu_device=0) -> None:
@@ -39,6 +79,7 @@ def build_branches(input_dir: str, out_root: str, gpu_device=0) -> None:
         gpu_device=gpu_device,
         repair_channels=MUSE_CHANNELS,   # mask+reconstruct all 4 real channels in full
     )
+    _propagate_annotations(input_dir, out_root / "denoised")
 
     reconstruct_fif(
         input_dir=input_dir,
@@ -47,6 +88,7 @@ def build_branches(input_dir: str, out_root: str, gpu_device=0) -> None:
         gpu_device=gpu_device,
         target_channel_count=POSTERIOR_TARGETS,   # hallucinate posterior channels only
     )
+    _propagate_annotations(input_dir, out_root / "upsampled")
 
     print(f"branches written under {out_root}")
     print("  denoised -> read from denoised/full_reconstruction/*.fif (model output on all 4ch)")
