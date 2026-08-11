@@ -21,7 +21,12 @@ ALPHA_BAND = (8.0, 13.0)
 
 
 def _epoch_rows(seg, branch: str, block_idx, condition: str) -> list[dict]:
-    epochs = mne.make_fixed_length_epochs(seg, duration=EPOCH_SEC, overlap=0.0, preload=True, verbose="ERROR")
+    # reject_by_annotation is explicit, not defaulted: ingestion/muse_to_fif.py marks every
+    # Bluetooth dropout with a BAD_gap annotation precisely so the window straddling the seam
+    # is dropped here. A discontinuity is a step artifact with broadband power that lands in
+    # the 8-13 Hz band, i.e. straight into the EC-EO numbers this table feeds.
+    epochs = mne.make_fixed_length_epochs(seg, duration=EPOCH_SEC, overlap=0.0, preload=True,
+                                          reject_by_annotation=True, verbose="ERROR")
     psd = epochs.compute_psd(fmin=ALPHA_BAND[0], fmax=ALPHA_BAND[1], verbose="ERROR")
     alpha_power = psd.get_data().mean(axis=-1)  # (n_epochs, n_channels), mean linear power over alpha bins
 
