@@ -22,7 +22,6 @@ Usage:
 """
 
 import argparse
-import contextlib
 import subprocess
 import sys
 import threading
@@ -55,8 +54,15 @@ def _log_line(msg: str) -> str:
     return f"{LOG_PREFIX}{time.strftime('%H:%M:%S')}] {msg}"
 
 
+# The worker replaces sys.stdout/sys.stderr with the escaping proxy for its whole
+# lifetime, so supervisor lines are written to this saved handle on the real stdout
+# rather than through the proxy. The parent leaves it as the process stdout.
+_log_out = sys.stdout
+
+
 def log(msg: str) -> None:
-    print(_log_line(msg), flush=True)
+    _log_out.write(_log_line(msg) + "\n")
+    _log_out.flush()
 
 
 def is_streaming_line(line: str) -> bool:
@@ -101,7 +107,8 @@ def _confirm_stream_when_live(address: str, out) -> None:
     Polling the outlet is the only check no advertising device can spoof: the
     watchdog is disarmed by an outlet that exists on the machine and carries the
     address we chose to connect to, not by a string somebody printed. Writes to the
-    real stdout, which the worker keeps out of the muselsl redirect for this reason.
+    saved real-stdout handle, not the process-wide escaping proxy the worker installs
+    over sys.stdout, so this line reaches the parent as a genuine supervisor line.
     """
     from pylsl import resolve_byprop
 
@@ -116,13 +123,25 @@ def _confirm_stream_when_live(address: str, out) -> None:
 
 def worker(address: str | None) -> None:
     """One scan+connect+stream cycle. Runs in a child process."""
+    global _log_out
+
     from muselsl import list_muses, stream
 
-    untrusted = _UntrustedOutput(sys.stdout)
+    real_stdout = sys.stdout
+    _log_out = real_stdout
+    untrusted = _UntrustedOutput(real_stdout)
+    # Swapped process-wide and for the rest of the worker's life, not scoped to the
+    # calls into muselsl: its Bluetooth backend prints from background threads that
+    # outlive those calls, and print() resolves sys.stdout at call time. A scoped
+    # redirect would leave windows in which device-supplied text — BLE names are
+    # arbitrary bytes, embedded newlines included — reaches the parent unescaped and
+    # could forge a supervisor line. Only log()/_confirm_stream_when_live hold the
+    # real stdout, so they remain the sole producers of LOG_PREFIX lines.
+    sys.stdout = untrusted
+    sys.stderr = untrusted
 
     log("scanning...")
-    with contextlib.redirect_stdout(untrusted), contextlib.redirect_stderr(untrusted):
-        muses = list_muses()
+    muses = list_muses()
     untrusted.flush()
     if not muses:
         log("NO MUSE advertising — headset is off, asleep, or connected elsewhere (phone app?)")
@@ -138,9 +157,8 @@ def worker(address: str | None) -> None:
     address = address or muses[0]["address"]
 
     log(f"connecting to {_quote(address)}")
-    threading.Thread(target=_confirm_stream_when_live, args=(address, sys.stdout), daemon=True).start()
-    with contextlib.redirect_stdout(untrusted), contextlib.redirect_stderr(untrusted):
-        stream(address)  # blocks until the headset disconnects
+    threading.Thread(target=_confirm_stream_when_live, args=(address, real_stdout), daemon=True).start()
+    stream(address)  # blocks until the headset disconnects
     untrusted.flush()
     log("headset disconnected")
 
