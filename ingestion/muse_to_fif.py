@@ -43,13 +43,17 @@ GAP_FACTOR = 5.0
 
 def route_output_dir(csv_path: str) -> Path:
     name = Path(csv_path).stem.lower()
-    if "open" in name:
-        return Path("data/input_eo")
-    if "closed" in name:
-        return Path("data/input_ec")
+    # Both markers is as undecidable as neither, and worse: the directory is the only
+    # record of the condition downstream, so guessing would silently invert a subject's
+    # EC/EO contrast instead of failing.
+    markers = [marker for marker in ("open", "closed") if marker in name]
+    if len(markers) == 1:
+        return Path("data/input_eo" if markers[0] == "open" else "data/input_ec")
+    found = f"found both {markers}" if markers else "found neither"
     raise ValueError(
-        f"Can't tell EO/EC condition from filename {csv_path!r}: "
-        "expected 'open' or 'closed' somewhere in the name, or pass an explicit output path."
+        f"Can't tell EO/EC condition from filename {csv_path!r} ({found}): "
+        "expected exactly one of 'open' or 'closed' somewhere in the name, "
+        "or pass an explicit output path."
     )
 
 
