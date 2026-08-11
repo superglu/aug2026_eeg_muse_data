@@ -1,6 +1,8 @@
 """
 Compare EO/EC discriminability across branches (raw / denoised / upsampled):
-  1. spectral sanity check: EC vs EO alpha-power per channel per branch (dB)
+  1. spectral sanity check: EC vs EO alpha-power per channel per branch (dB),
+     reported per subject and pooled over subjects (per_subject_spectral_check /
+     spectral_check) -- the README requires both, not pooled alone
   2. classification accuracy: grouped cross-validated logistic regression per branch
      (grouped by block_idx so folds never mix epochs from the same EC/EO block, and
      stratified so every test fold holds both conditions -- see n_splits_for)
@@ -15,13 +17,54 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedGroupKFold, cross_val_score
 
+from branch_files import subject_key
+
 MAX_SPLITS = 5
 
 
+def _db(ec: pd.Series, eo: pd.Series) -> pd.Series:
+    return (ec - eo) * 10 / np.log(10)
+
+
+def per_subject_spectral_check(df: pd.DataFrame) -> pd.DataFrame:
+    """EC - EO log-alpha-power (dB) per subject per channel per branch.
+
+    The README requires this alongside the pooled number ("Report per-subject alpha
+    suppression index ... not just pooled"): at n=4, one contaminated block or one
+    low-alpha subject can carry a pooled mean, and pooling alone can't tell "consistent
+    moderate effect" from "huge effect in some, absent in others". Each subject's two
+    recordings are matched by subject_key, since the feature table carries one block_idx
+    per recording (one condition each), not per subject.
+    """
+    # astype(str): a block id read back from features.csv can arrive as a number if the
+    # operator passed a numeric --block-id, and subject_key takes a name.
+    tidy = df.assign(subject=df["block_idx"].astype(str).map(subject_key))
+    per_subject = (tidy.groupby(["branch", "channel", "subject", "condition"])["log_alpha_power"]
+                   .mean().unstack("condition"))
+    for condition in ("EC", "EO"):
+        if condition not in per_subject.columns:
+            per_subject[condition] = np.nan
+    per_subject["EC_minus_EO_db"] = _db(per_subject["EC"], per_subject["EO"])
+    return per_subject.reset_index()
+
+
 def spectral_check(df: pd.DataFrame) -> pd.DataFrame:
-    g = df.groupby(["branch", "channel", "condition"])["log_alpha_power"].mean().unstack("condition")
-    g["EC_minus_EO_db"] = (g["EC"] - g["EO"]) * 10 / np.log(10)
-    return g.reset_index()
+    """Pooled EC - EO log-alpha-power (dB), each subject weighted equally.
+
+    Averaging raw epochs would weight each subject by its number of surviving epochs,
+    and those counts are not equal: features.py drops epochs straddling a BAD_gap, so a
+    subject with several Bluetooth dropouts would count for less than a clean one and
+    data quality would silently reweight the reported group dB. Averaging the per-subject
+    values instead makes this the mean of the effect over subjects. Subjects missing one
+    of the two conditions have no effect to contribute and are excluded.
+    """
+    per_subject = per_subject_spectral_check(df).dropna(subset=["EC_minus_EO_db"])
+    return per_subject.groupby(["branch", "channel"]).agg(
+        EC=("EC", "mean"),
+        EO=("EO", "mean"),
+        EC_minus_EO_db=("EC_minus_EO_db", "mean"),
+        n_subjects=("subject", "nunique"),
+    ).reset_index()
 
 
 def n_splits_for(y: np.ndarray, groups: np.ndarray) -> int:
@@ -66,7 +109,10 @@ if __name__ == "__main__":
     feature_csvs = sys.argv[1:]
     df = pd.concat([pd.read_csv(f) for f in feature_csvs], ignore_index=True)
 
-    print("=== Spectral sanity check: EC - EO log-alpha-power (dB) per channel ===")
+    print("=== Spectral sanity check: EC - EO log-alpha-power (dB) per subject per channel ===")
+    print(per_subject_spectral_check(df).to_string(index=False))
+    print()
+    print("=== Spectral sanity check: EC - EO log-alpha-power (dB) pooled over subjects ===")
     print(spectral_check(df).to_string(index=False))
     print()
     print("=== Classification accuracy per branch (StratifiedGroupKFold by block) ===")
