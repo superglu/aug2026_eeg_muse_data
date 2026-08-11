@@ -21,6 +21,8 @@ import numpy as np
 
 from branch_files import CONDITION_INPUT_DIRS
 
+MIN_GAP_MARK_SEC = 0.15  # minimum drawn width of a BAD_gap marker, so a 1-sample seam is visible
+
 
 def plot_raw_figure(fif_path, out_path, title, demean: bool = True) -> Path:
     raw = mne.io.read_raw_fif(str(fif_path), preload=True, verbose="ERROR")
@@ -36,12 +38,25 @@ def plot_raw_figure(fif_path, out_path, title, demean: bool = True) -> Path:
     if n == 1:
         axes = [axes]
 
+    # Bluetooth dropouts are marked BAD_gap by ingestion/muse_to_fif.py and dropped
+    # downstream (features.py, band_power_check.py). Nothing is dropped from a figure,
+    # so mark the seams instead: an unmarked discontinuity reads as a real step in the
+    # signal when comparing raw against ZUNA's reconstruction overlays.
+    gaps = [(onset, duration) for onset, duration, description
+            in zip(raw.annotations.onset, raw.annotations.duration, raw.annotations.description)
+            if str(description).startswith("BAD_")]
+
     for i in range(n):
         ax = axes[i]
         trace = data[i].copy()
         if demean:
             trace -= trace.mean()
         ax.plot(t, trace, color="#1f77b4", lw=0.7, alpha=0.9, label="input")
+        for j, (onset, duration) in enumerate(gaps):
+            # a seam is annotated as one sample wide, which is sub-pixel over 60 s;
+            # widen it to MIN_GAP_MARK_SEC purely so the marker is visible
+            ax.axvspan(onset, onset + max(duration, MIN_GAP_MARK_SEC), color="#eb6834", alpha=0.35,
+                       lw=0, label="recording gap" if (i == 0 and j == 0) else None)
         ax.set_ylabel(ch_names[i], rotation=0, ha="right", va="center", fontsize=9)
         ax.set_yticks([])
         ax.margins(x=0)

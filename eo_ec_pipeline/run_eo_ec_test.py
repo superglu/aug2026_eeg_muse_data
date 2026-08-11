@@ -24,7 +24,7 @@ import pandas as pd
 
 from branch_files import BRANCH_SUBDIR, CONDITION_INPUT_DIRS, branch_fifs
 from branches import build_branches
-from classify import classify, spectral_check
+from classify import classify, per_subject_spectral_check, spectral_check
 from features import extract_features
 
 
@@ -52,7 +52,10 @@ def run_eo_ec_test(branch_root: str = "data/branches", gpu_device=0, skip_build:
     df.to_csv(out_csv, index=False)
     print(f"wrote {len(df)} feature rows -> {out_csv}")
     print()
-    print("=== Spectral sanity check: EC - EO log-alpha-power (dB) per channel ===")
+    print("=== Spectral sanity check: EC - EO log-alpha-power (dB) per subject per channel ===")
+    print(per_subject_spectral_check(df).to_string(index=False))
+    print()
+    print("=== Spectral sanity check: EC - EO log-alpha-power (dB) pooled over subjects ===")
     print(spectral_check(df).to_string(index=False))
     print()
     print("=== Classification accuracy per branch (StratifiedGroupKFold by recording) ===")

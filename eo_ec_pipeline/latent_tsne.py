@@ -27,7 +27,7 @@ import pandas as pd
 from sklearn.manifold import TSNE
 from sklearn.preprocessing import StandardScaler
 
-from branch_files import BRANCH_SUBDIR, CONDITION_INPUT_DIRS, branch_fifs
+from branch_files import BRANCH_SUBDIR, CONDITION_INPUT_DIRS, branch_fifs, subject_key
 from features import extract_features
 
 REAL_CHANNELS = ["TP9", "AF7", "AF8", "TP10"]
@@ -47,7 +47,10 @@ def build_feature_table(branch_root: str = "data/branches") -> pd.DataFrame:
             # branch_fifs raises on a missing/unbuilt variant: a variant silently dropped
             # here would recolor the same embedding as if it had never been requested.
             for fif in branch_fifs(variant_dir, condition):
-                subject = fif.stem.split("_")[0]
+                # subject_key, not the first "_"-separated token: the shared rule keeps a
+                # subject id that itself contains an underscore from collapsing every
+                # recording into one colour, and matches how classify.py keys subjects.
+                subject = subject_key(fif.stem)
                 block_id = f"{condition}_{branch}_{fif.stem}"
                 df = extract_features(str(fif), branch, condition=condition, block_id=block_id)
                 wide = df[df["channel"].isin(REAL_CHANNELS)].pivot_table(

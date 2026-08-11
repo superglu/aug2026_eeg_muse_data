@@ -26,6 +26,29 @@ BRANCH_SUBDIR = {
 }
 
 
+def subject_key(name: str) -> str:
+    """The subject a recording belongs to, shared by that subject's EO and EC files.
+
+    The design is paired (one EO and one EC block per subject), but nothing in the
+    filesystem layout records the pairing: the condition lives in the folder, and
+    the subject only in the filename. muse_to_fif.py routes on "open"/"closed"
+    appearing in the export name, so the subject is what precedes that marker --
+    "gary_closed_2026-08-09_raw" and "gary_open_2026-08-09_raw" both key to "gary".
+    A block id built as "<condition>_<stem>" (run_eo_ec_test.py) is accepted too.
+    Names without the marker fall back to their first underscore-separated token.
+    """
+    stem = Path(name).stem
+    lowered = stem.lower()
+    for prefix in ("ec_", "eo_"):
+        if lowered.startswith(prefix):
+            stem, lowered = stem[len(prefix):], lowered[len(prefix):]
+    for marker in ("closed", "open"):
+        cut = lowered.find(marker)
+        if cut != -1:
+            return lowered[:cut].strip("_- ") or lowered.split("_")[0]
+    return lowered.split("_")[0]
+
+
 def input_stems(condition: str) -> list[str]:
     """Filename stems of the recordings currently accepted for a condition."""
     return sorted(f.stem for f in Path(CONDITION_INPUT_DIRS[condition]).glob("*.fif"))
